@@ -2,6 +2,7 @@ import type pg from "pg";
 import { loadAgentVersionConfig } from "./agent-config";
 import { runAgentPreview, type InboundTurnDeps } from "./inbound-turn";
 import { newPreviewResult, scenarioContext } from "./preview";
+import { MODELO_DO_SEAM_CLAUDE_CLI_LOCAL } from "@/lib/ai/claude-cli-local";
 export async function testAgentVersion(
   pool: pg.Pool,
   deps: InboundTurnDeps,
@@ -13,15 +14,29 @@ export async function testAgentVersion(
     sampleMessage: string;
     sampleContact?: { name?: string; phone?: string };
     channelId: string | null;
+    /** Só a rota local de teste preenche; nunca é persistido na versão. */
+    claudeCliLocal?: boolean;
   },
 ) {
-  const agent = await loadAgentVersionConfig(
+  const loadedAgent = await loadAgentVersionConfig(
     pool,
     input.organizationId,
     input.agentId,
     input.versionId,
   );
-  if (!agent) throw new Error("preview_version_unavailable");
+  if (!loadedAgent) throw new Error("preview_version_unavailable");
+  // O registry local ocupa a porta Anthropic do seam apenas durante esta
+  // prévia. Clonar a config faz o modelo/provider caminharem juntos também nas
+  // chamadas auxiliares, sem regravar o rascunho nem abrir uma porta no worker.
+  const agent = input.claudeCliLocal
+    ? {
+        ...loadedAgent,
+        provider: "anthropic",
+        model: MODELO_DO_SEAM_CLAUDE_CLI_LOCAL,
+        credentialId: null,
+        operatorModel: null,
+      }
+    : loadedAgent;
   const result = newPreviewResult();
   const context = scenarioContext(
     [

@@ -298,6 +298,15 @@ const schema = z.object({
   VERCEL_AI_GATEWAY_URL: z.string().optional().default(""),
   ANTHROPIC_API_KEY: z.string().optional().default(""),
   OPENAI_API_KEY: z.string().optional().default(""),
+  /**
+   * Adaptador EXPERIMENTAL para ensaiar agentes pela Claude CLI local.
+   *
+   * Ausente ou `disabled` = desligado. Presente e vazio = procura `claude` no PATH. O
+   * consumidor ainda recusa NODE_ENV=production; declarar aqui só impede que a
+   * variável configurada pelo dev seja descartada do contrato do app.
+   */
+  CLAUDE_CLI_PATH: z.string().optional(),
+  CLAUDE_CLI_MODEL: z.string().optional(),
   // Esforço de raciocínio dos modelos da OpenAI (o*, gpt-5*, gpt-6*). `z.string()`
   // e NUNCA `z.enum` (motivo mais abaixo, em AGENT_DISPATCH_CONSUMER): quem valida
   // a grafia é o boot do worker, em `lib/agent-engine/env.ts`.

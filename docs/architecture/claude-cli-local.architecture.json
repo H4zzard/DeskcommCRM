@@ -1,0 +1,125 @@
+{
+  "schema_version": 1,
+  "titulo": "Claude CLI local no ensaio do agente",
+  "descricao": "Bancada opt-in de desenvolvimento: a tela observa a sessão claude.ai local, o teste injeta um registry efêmero e o runtime real executa tools/guardrails sem tocar no atendimento publicado.",
+  "lanes": [
+    { "id": "inicio", "label": "Inicialização local" },
+    { "id": "ui", "label": "Telas autenticadas" },
+    { "id": "api", "label": "API de prévia" },
+    { "id": "runtime", "label": "Runtime do agente" },
+    { "id": "externo", "label": "Processo local" }
+  ],
+  "mainPath": [
+    "env",
+    "predev",
+    "login",
+    "credenciais",
+    "teste",
+    "rota",
+    "registry",
+    "cli",
+    "preview"
+  ],
+  "nodes": [
+    {
+      "id": "env",
+      "lane": "inicio",
+      "label": "CLAUDE_CLI_PATH",
+      "sublabel": "ausente/disabled=off; vazio=claude no PATH; produção=off",
+      "type": "config"
+    },
+    {
+      "id": "predev",
+      "lane": "inicio",
+      "label": "predev / pnpm claude:login",
+      "sublabel": "confere auth status e abre login somente em TTY",
+      "type": "lib"
+    },
+    {
+      "id": "login",
+      "lane": "externo",
+      "label": "claude auth login/status",
+      "sublabel": "sessão pertence à CLI; somente authMethod=claude.ai",
+      "type": "service"
+    },
+    {
+      "id": "credenciais",
+      "lane": "ui",
+      "label": "IA › Credenciais",
+      "sublabel": "estado visível; nenhum token salvo",
+      "type": "route"
+    },
+    {
+      "id": "teste",
+      "lane": "ui",
+      "label": "Agente › Teste",
+      "sublabel": "opt-in por ensaio; versão persistida não muda",
+      "type": "route"
+    },
+    {
+      "id": "status",
+      "lane": "api",
+      "label": "GET claude-cli-local/status",
+      "sublabel": "manager; não expõe caminho nem segredo",
+      "type": "api"
+    },
+    {
+      "id": "rota",
+      "lane": "api",
+      "label": "POST versão/test",
+      "sublabel": "admin; Zod; recusa fora do local ou sem assinatura",
+      "type": "api"
+    },
+    {
+      "id": "registry",
+      "lane": "runtime",
+      "label": "registry efêmero Anthropic",
+      "sublabel": "só nesta prévia; API keys removidas do filho",
+      "type": "lib"
+    },
+    {
+      "id": "cli",
+      "lane": "externo",
+      "label": "claude -p estruturado",
+      "sublabel": "stdin; sem tools/MCP/arquivos/sessão persistente",
+      "type": "service"
+    },
+    {
+      "id": "preview",
+      "lane": "runtime",
+      "label": "runAgentPreview",
+      "sublabel": "tools, guardrails, trace e ai_agent_runs; zero WhatsApp",
+      "type": "lib"
+    },
+    {
+      "id": "retorno",
+      "lane": "ui",
+      "label": "Resultado e motivo de falha",
+      "sublabel": "laço: operador corrige instalação/login/prompt e repete",
+      "type": "route"
+    }
+  ],
+  "edges": [
+    { "id": "e1", "from": "env", "to": "predev", "label": "ativa" },
+    { "id": "e2", "from": "predev", "to": "login", "label": "abre se faltar sessão" },
+    { "id": "e3", "from": "login", "to": "credenciais", "label": "estado observado" },
+    { "id": "e4", "from": "credenciais", "to": "status", "label": "mesma leitura" },
+    { "id": "e5", "from": "status", "to": "teste", "label": "habilita ou explica" },
+    { "id": "e6", "from": "teste", "to": "rota", "label": "claude_cli_local=true" },
+    { "id": "e7", "from": "rota", "to": "login", "label": "reconfere antes do run" },
+    { "id": "e8", "from": "rota", "to": "registry", "label": "injeta sem persistir" },
+    { "id": "e9", "from": "registry", "to": "cli", "label": "prompt e catálogo por stdin" },
+    { "id": "e10", "from": "cli", "to": "registry", "label": "texto ou tool_call" },
+    { "id": "e11", "from": "registry", "to": "preview", "label": "LanguageModel v3" },
+    {
+      "id": "e12",
+      "from": "preview",
+      "to": "registry",
+      "label": "resultado da tool volta ao laço"
+    },
+    { "id": "e13", "from": "preview", "to": "retorno", "label": "trace e resposta simulada" },
+    { "id": "e14", "from": "retorno", "to": "teste", "label": "corrigir e repetir" },
+    { "id": "e15", "from": "env", "to": "rota", "label": "portão local também no servidor" },
+    { "id": "e16", "from": "status", "to": "credenciais", "label": "estado legível" }
+  ]
+}

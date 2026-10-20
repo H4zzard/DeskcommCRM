@@ -449,6 +449,22 @@ Drawer lateral com mesma trace UI da Tab Testar, mais:
 - Após validação async (1-3s): toast verde "Validada — 8 modelos disponíveis" OU vermelho "Erro: Invalid API key"
 - Se falhou, credencial fica `is_active=true` mas `validated_at=null`. UI bloqueia uso até revalidar.
 
+### 7.3 Claude CLI local (bancada de desenvolvimento)
+
+Quando `CLAUDE_CLI_PATH` está presente, não vale `disabled` e `NODE_ENV` não é `production`, a tela
+mostra um cartão separado para a sessão local da Claude CLI. Essa sessão não é
+uma linha de `ai_provider_credentials`: nenhum token entra no banco. O cartão
+aceita somente o método `claude.ai` e aponta para `pnpm claude:login` quando o
+binário ou a sessão não estão prontos.
+
+Na aba Teste do agente, o operador pode aplicar esse override a uma única
+prévia. A versão salva não muda e não pode ser publicada com a CLI. O backend
+reconfere o portão local e a sessão, injeta um registry efêmero e mantém o mesmo
+runtime de tools/guardrails. O caminho não existe no worker de atendimento e é
+recusado incondicionalmente em produção. Contrato operacional e mapa:
+[`docs/features/claude-cli-local.md`](../features/claude-cli-local.md) e
+[`docs/architecture/claude-cli-local.architecture.json`](../architecture/claude-cli-local.architecture.json).
+
 ### 7.3 Excluir credencial
 
 - Bloqueio: se `credential_id` está em uso por alguma `ai_agent_versions` publicada → erro 409 "Em uso por X agentes. Substitua antes de excluir."

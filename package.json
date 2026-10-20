@@ -7,8 +7,10 @@
     "node": ">=22"
   },
   "scripts": {
+    "predev": "node --env-file-if-exists=.env --env-file-if-exists=.env.local scripts/claude-cli-login.mjs",
     "dev": "next dev",
     "dev:webpack": "next dev",
+    "claude:login": "node --env-file-if-exists=.env --env-file-if-exists=.env.local scripts/claude-cli-login.mjs --force",
     "build": "next build",
     "build:webpack": "next build",
     "start": "next start",

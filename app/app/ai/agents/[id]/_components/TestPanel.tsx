@@ -8,7 +8,7 @@
  * `stub: true`; o componente mostra um aviso amigável.
  */
 import * as React from "react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -16,6 +16,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
+import { Switch } from "@/components/ui/switch";
 
 import { apiClient } from "@/lib/api/client";
 import { ApiError } from "@/lib/api/types";
@@ -45,6 +46,7 @@ interface TestResponse {
     latency_ms?: number;
     would_send_to?: { session?: string | null; chat_id?: string | null };
     stub?: boolean;
+    claude_cli_local?: boolean;
     candidates?: Array<{ body: string; trace: Array<{ gate: string; verdict: string }> }>;
     proposals?: Array<{ tool: string; arguments: unknown }>;
     impediments?: Array<{ code: string; message: string }>;
@@ -63,6 +65,17 @@ interface TestResponse {
       termos: string[];
       naoAvaliados: Array<{ gate: string; porque: string }>;
     };
+  };
+}
+
+interface ClaudeCliStatusResponse {
+  data: {
+    habilitado: boolean;
+    instalado: boolean;
+    autenticado: boolean;
+    assinatura: boolean;
+    metodo: string | null;
+    modelo: string;
   };
 }
 
@@ -133,6 +146,14 @@ export function TestPanel({ agent, draft, published, readOnly }: Props) {
   const [contactPhone, setContactPhone] = React.useState("");
   const [pending, setPending] = React.useState(false);
   const [result, setResult] = React.useState<TestResponse["data"] | null>(null);
+  const [usarClaudeCli, setUsarClaudeCli] = React.useState(false);
+  const claudeCli = useQuery({
+    queryKey: ["ai", "claude-cli-local", "status"],
+    queryFn: async () =>
+      (await apiClient.get<ClaudeCliStatusResponse>("/api/v1/ai/claude-cli-local/status")).data,
+    staleTime: 15_000,
+    retry: false,
+  });
 
   if (!target) {
     return (
@@ -157,6 +178,7 @@ export function TestPanel({ agent, draft, published, readOnly }: Props) {
     setResult(null);
     try {
       const body: Record<string, unknown> = { sample_message: message.trim() };
+      if (usarClaudeCli) body.claude_cli_local = true;
       if (contactName.trim() || contactPhone.trim()) {
         body.sample_contact = {
           ...(contactName.trim() ? { name: contactName.trim() } : {}),
@@ -215,6 +237,30 @@ export function TestPanel({ agent, draft, published, readOnly }: Props) {
             {t("Nenhuma mensagem é enviada via WhatsApp. O run é registrado como dry-run.")}
           </p>
         </div>
+
+        {claudeCli.data?.habilitado ? (
+          <div
+            className="flex items-start justify-between gap-4 rounded-md border p-3"
+            data-testid="opcao-claude-cli-local"
+          >
+            <div className="space-y-1">
+              <Label htmlFor="usar-claude-cli-local">
+                {t("Usar Claude CLI local neste ensaio")}
+              </Label>
+              <p className="text-xs text-muted-foreground">
+                {claudeCli.data.assinatura
+                  ? `${t("Sessão claude.ai conectada · modelo")} ${claudeCli.data.modelo}`
+                  : t("Conecte a assinatura em IA › Credenciais antes de ligar.")}
+              </p>
+            </div>
+            <Switch
+              id="usar-claude-cli-local"
+              checked={usarClaudeCli}
+              onCheckedChange={setUsarClaudeCli}
+              disabled={pending || readOnly || !claudeCli.data.assinatura}
+            />
+          </div>
+        ) : null}
 
         <div className="space-y-2">
           <Label htmlFor="test-message">{t("Mensagem do cliente (sample)")}</Label>
@@ -278,6 +324,16 @@ export function TestPanel({ agent, draft, published, readOnly }: Props) {
                 )}
               </p>
             ) : null}
+            {result.claude_cli_local ? (
+              <p
+                className="rounded-md border border-violet-500/40 bg-violet-500/5 p-2 text-xs text-muted-foreground"
+                data-testid="resultado-claude-cli-local"
+              >
+                {t(
+                  "Ensaio executado pela Claude CLI local. Ferramentas e verificações foram processadas pelo modo de prévia; nenhuma mensagem foi enviada.",
+                )}
+              </p>
+            ) : null}
 
             <div className="grid grid-cols-2 gap-2 text-xs">
               <Cell label={t("Status")}>{result.status}</Cell>
@@ -285,8 +341,8 @@ export function TestPanel({ agent, draft, published, readOnly }: Props) {
                 {typeof result.latency_ms === "number" ? `${result.latency_ms}ms` : "—"}
               </Cell>
               <Cell label={t("Tokens in/out")}>
-                {result.tokens_in?.toLocaleString()??"—"} /{" "}
-                {result.tokens_out?.toLocaleString()??"—"}
+                {result.tokens_in?.toLocaleString() ?? "—"} /{" "}
+                {result.tokens_out?.toLocaleString() ?? "—"}
               </Cell>
               <Cell label={t("Custo (cents)")}>{result.cost_cents ?? "—"}</Cell>
             </div>

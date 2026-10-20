@@ -40,6 +40,11 @@ import { getRequestPool } from "@/lib/agent-engine/db/request-pool";
 import { traduzir } from "@/lib/i18n/dicionario";
 import { logger } from "@/lib/logger";
 import { LlmConteudoBloqueadoError } from "@/lib/agent-engine/edge/llm/conteudo-bloqueado";
+import {
+  configClaudeCliLocal,
+  createClaudeCliLocalRegistry,
+  estadoClaudeCliLocal,
+} from "@/lib/ai/claude-cli-local";
 
 export const dynamic = "force-dynamic";
 
@@ -130,15 +135,36 @@ export async function POST(req: NextRequest, ctx: Ctx): Promise<Response> {
   // não deixa cópia para envelhecer. O teste da rota cobra isso.
   const { data: version } = await admin
     .from("ai_agent_versions")
-    .select(
-      "id, channel_session_id",
-    )
+    .select("id, channel_session_id")
     .eq("id", vid)
     .eq("organization_id", organizationId)
     .eq("agent_id", id)
     .maybeSingle();
 
   if (!version) return fail("not_found", t("Version não encontrada."), 404, { requestId });
+
+  // Confere o opt-in e o tipo de login ANTES de abrir `ai_agent_runs`: uma
+  // configuração local incompleta não pode deixar linha eternamente running.
+  const configDaCli = parsed.data.claude_cli_local ? configClaudeCliLocal() : null;
+  if (parsed.data.claude_cli_local) {
+    if (configDaCli === null) {
+      return fail(
+        "claude_cli_local_disabled",
+        t("A Claude CLI local não está habilitada nesta instalação de desenvolvimento."),
+        422,
+        { requestId },
+      );
+    }
+    const estado = await estadoClaudeCliLocal(configDaCli);
+    if (!estado.instalado || !estado.assinatura) {
+      return fail(
+        "claude_cli_local_login_required",
+        t("Conecte uma conta claude.ai pela Claude CLI antes de executar este ensaio."),
+        422,
+        { requestId },
+      );
+    }
+  }
 
   const startedAt = new Date();
 
@@ -167,7 +193,30 @@ export async function POST(req: NextRequest, ctx: Ctx): Promise<Response> {
   let resultPayload: Record<string, unknown>;
 
   try {
-    const result = await testAgentVersion(getRequestPool(), requestTurnDeps(), {
+    const deps = requestTurnDeps();
+    if (parsed.data.claude_cli_local && configDaCli !== null) {
+      deps.registry = createClaudeCliLocalRegistry(configDaCli);
+      deps.llmCfg.anthropicApiKey = "sessao-local-da-claude-cli";
+      // Modelo auxiliar fixado por env pressupõe o provider padrão da org. No
+      // ensaio local todos herdam o par temporário do agente, para nenhuma
+      // chamada escapar para API por uma configuração antiga.
+      // `requestTurnDeps()` sempre preenche os dois; o `!` registra essa
+      // diferença em relação às fixtures unitárias que podem omiti-los.
+      const compaction = { ...deps.knobs.compaction! };
+      const promiseSemantic = { ...deps.knobs.promiseSemantic! };
+      delete compaction.model;
+      delete promiseSemantic.model;
+      deps.knobs = {
+        ...deps.knobs,
+        compaction,
+        stageClassifier: {},
+        jailbreak: {},
+        promiseSemantic,
+        followupAi: {},
+      };
+    }
+
+    const result = await testAgentVersion(getRequestPool(), deps, {
       organizationId: organizationId,
       agentId: id,
       versionId: vid,
@@ -175,6 +224,7 @@ export async function POST(req: NextRequest, ctx: Ctx): Promise<Response> {
       sampleMessage: parsed.data.sample_message,
       sampleContact: parsed.data.sample_contact,
       channelId: version.channel_session_id,
+      ...(parsed.data.claude_cli_local ? { claudeCliLocal: true } : {}),
     });
     const finalText = result.candidates.map((c) => c.body).join("\n\n");
     // #2490 — mídia pendente é teste REPROVADO, mesmo com candidato na mão: o
@@ -190,6 +240,7 @@ export async function POST(req: NextRequest, ctx: Ctx): Promise<Response> {
       ...result,
       stub: process.env.INTERNAL_AGENT_RUN_STUB === "true",
       guardrails: avaliarRespostaDeTeste(finalText, result.midia),
+      claude_cli_local: parsed.data.claude_cli_local,
     };
     // ⚠️ `completed`, não `"ok"`. O CHECK da coluna aceita
     // pending|running|completed|failed|aborted|handoff — `"ok"` é o vocabulário
@@ -235,7 +286,9 @@ export async function POST(req: NextRequest, ctx: Ctx): Promise<Response> {
     });
     return fail(
       "preview_failed",
-      err instanceof LlmConteudoBloqueadoError ? err.message : t("Não foi possível executar o teste. Confira modelo, credencial e materiais do agente."),
+      err instanceof LlmConteudoBloqueadoError
+        ? err.message
+        : t("Não foi possível executar o teste. Confira modelo, credencial e materiais do agente."),
       422,
       { requestId },
     );
@@ -249,7 +302,11 @@ export async function POST(req: NextRequest, ctx: Ctx): Promise<Response> {
     resourceType: "ai_agent_version",
     resourceId: vid,
     requestId,
-    metadata: { run_id: runRow.id, dry_run: true },
+    metadata: {
+      run_id: runRow.id,
+      dry_run: true,
+      claude_cli_local: parsed.data.claude_cli_local,
+    },
   });
 
   return ok(resultPayload, { requestId });

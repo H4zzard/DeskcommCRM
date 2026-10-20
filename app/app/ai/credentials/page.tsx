@@ -31,8 +31,10 @@ import { PROVEDOR_POR_ASSINATURA, PROVEDORES } from "@/lib/ai/pontos/provedores"
 import { moduloLigado } from "@/lib/instalacao/modulos";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { tagDeIdioma } from "@/lib/i18n/datas";
+import { configClaudeCliLocal, estadoClaudeCliLocal } from "@/lib/ai/claude-cli-local";
 import { CredentialsList } from "./_components/CredentialsList";
 import { PainelDeLoginCodex } from "./_components/PainelDeLoginCodex";
+import { PainelClaudeCliLocal } from "./_components/PainelClaudeCliLocal";
 
 export const dynamic = "force-dynamic";
 
@@ -215,6 +217,10 @@ export default async function CredentialsPage() {
   const ambiente = lerAmbiente();
   const instalacaoTemIa =
     ambiente.gateway || Object.values(ambiente.chavesDeProvedor).some(Boolean);
+  const configDaClaudeCli = configClaudeCliLocal();
+  const estadoDaClaudeCli = configDaClaudeCli
+    ? await estadoClaudeCliLocal(configDaClaudeCli)
+    : null;
 
   return (
     <div className="flex h-full flex-col gap-6 p-6">
@@ -243,6 +249,9 @@ export default async function CredentialsPage() {
           siwcAutorizado={siwcAutorizado}
         />
       )}
+      {estadoDaClaudeCli ? (
+        <PainelClaudeCliLocal estado={estadoDaClaudeCli} idioma={idioma} />
+      ) : null}
       <CredentialsList
         initialData={credentials}
         canWrite={canWrite}

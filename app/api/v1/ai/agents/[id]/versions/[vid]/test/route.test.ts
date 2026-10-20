@@ -15,6 +15,12 @@ import { testAgentVersion } from "@/lib/agent-engine/agent/sandbox";
 import { requestTurnDeps } from "@/lib/agent-engine/agent/request-deps";
 import { getRequestPool } from "@/lib/agent-engine/db/request-pool";
 
+const configDaCli = { caminho: "/tmp/claude", modelo: "sonnet" };
+const registryDaCli = { anthropic: vi.fn() };
+const configClaudeCliLocal = vi.hoisted(() => vi.fn());
+const estadoClaudeCliLocal = vi.hoisted(() => vi.fn());
+const createClaudeCliLocalRegistry = vi.hoisted(() => vi.fn());
+
 vi.mock("@/lib/auth/require-role", () => ({ requireRole: vi.fn() }));
 vi.mock("@/lib/supabase/admin", () => ({ createAdminClient: vi.fn() }));
 vi.mock("@/lib/audit", () => ({ audit: vi.fn(async () => undefined) }));
@@ -42,6 +48,11 @@ vi.mock("@/lib/agent-engine/agent/sandbox", () => ({
 }));
 vi.mock("@/lib/agent-engine/agent/request-deps", () => ({ requestTurnDeps: vi.fn() }));
 vi.mock("@/lib/agent-engine/db/request-pool", () => ({ getRequestPool: vi.fn() }));
+vi.mock("@/lib/ai/claude-cli-local", () => ({
+  configClaudeCliLocal,
+  estadoClaudeCliLocal,
+  createClaudeCliLocalRegistry,
+}));
 
 const ORG = "22222222-2222-4222-8222-222222222222";
 const USER = "11111111-1111-4111-8111-111111111111";
@@ -109,6 +120,7 @@ describe("POST .../versions/:vid/test — core compartilhado", () => {
   const turnDeps = {};
 
   beforeEach(() => {
+    vi.clearAllMocks();
     atualizacoes.length = 0;
     selectsDeVersao.length = 0;
     const user: AuthUser = {
@@ -128,6 +140,16 @@ describe("POST .../versions/:vid/test — core compartilhado", () => {
     vi.mocked(createAdminClient).mockReturnValue(stubAdmin(atualizacoes, selectsDeVersao) as never);
     vi.mocked(getRequestPool).mockReturnValue(requestPool as never);
     vi.mocked(requestTurnDeps).mockReturnValue(turnDeps as never);
+    configClaudeCliLocal.mockReturnValue(null);
+    estadoClaudeCliLocal.mockResolvedValue({
+      habilitado: false,
+      instalado: false,
+      autenticado: false,
+      assinatura: false,
+      metodo: null,
+      modelo: "sonnet",
+    });
+    createClaudeCliLocalRegistry.mockReturnValue(registryDaCli);
   });
 
   it("falha do core vira checkpoint e orientação legível", async () => {
@@ -195,6 +217,78 @@ describe("POST .../versions/:vid/test — core compartilhado", () => {
       expect.anything(),
       expect.anything(),
       expect.objectContaining({ versionId: VERSION }),
+    );
+  });
+
+  it("recusa o modo local antes de abrir um run quando não há assinatura claude.ai", async () => {
+    configClaudeCliLocal.mockReturnValue(configDaCli);
+    estadoClaudeCliLocal.mockResolvedValue({
+      habilitado: true,
+      instalado: true,
+      autenticado: true,
+      assinatura: false,
+      metodo: "api_key",
+      modelo: "sonnet",
+    });
+    const { POST } = await import("./route");
+    const req = new NextRequest("http://localhost/x", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ sample_message: "oi", claude_cli_local: true }),
+    });
+
+    const res = await POST(req, { params: Promise.resolve({ id: AGENT, vid: VERSION }) });
+    const body = (await res.json()) as { error?: { code?: string } };
+
+    expect(res.status).toBe(422);
+    expect(body.error?.code).toBe("claude_cli_local_login_required");
+    expect(testAgentVersion).not.toHaveBeenCalled();
+    expect(atualizacoes).toHaveLength(0);
+  });
+
+  it("liga o registry local só para a prévia e não persiste a troca na versão", async () => {
+    configClaudeCliLocal.mockReturnValue(configDaCli);
+    estadoClaudeCliLocal.mockResolvedValue({
+      habilitado: true,
+      instalado: true,
+      autenticado: true,
+      assinatura: true,
+      metodo: "claude.ai",
+      modelo: "sonnet",
+    });
+    const deps = {
+      registry: {},
+      llmCfg: { anthropicApiKey: "" },
+      knobs: {
+        compaction: { model: "modelo-fixo" },
+        stageClassifier: { model: "modelo-fixo" },
+        jailbreak: { model: "modelo-fixo" },
+        promiseSemantic: { model: "modelo-fixo" },
+        followupAi: { model: "modelo-fixo" },
+      },
+    };
+    vi.mocked(requestTurnDeps).mockReturnValue(deps as never);
+    const { POST } = await import("./route");
+    const req = new NextRequest("http://localhost/x", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ sample_message: "oi", claude_cli_local: true }),
+    });
+
+    await POST(req, { params: Promise.resolve({ id: AGENT, vid: VERSION }) });
+
+    expect(createClaudeCliLocalRegistry).toHaveBeenCalledWith(configDaCli);
+    expect(deps.registry).toBe(registryDaCli);
+    expect(deps.llmCfg.anthropicApiKey).toBe("sessao-local-da-claude-cli");
+    expect(deps.knobs.compaction.model).toBeUndefined();
+    expect(deps.knobs.promiseSemantic.model).toBeUndefined();
+    expect(testAgentVersion).toHaveBeenCalledWith(
+      requestPool,
+      deps,
+      expect.objectContaining({
+        versionId: VERSION,
+        claudeCliLocal: true,
+      }),
     );
   });
 });

@@ -302,6 +302,9 @@ export const publishSchema = z.object({ version_id: UUID }).strict();
 export const testRunSchema = z
   .object({
     sample_message: z.string().trim().min(1).max(4000),
+    // Opt-in por execução: não altera a versão e o servidor ainda exige o
+    // portão local + sessão claude.ai antes de honrar o pedido.
+    claude_cli_local: z.boolean().optional().default(false),
     sample_contact: z
       .object({
         name: z.string().trim().min(1).max(120).optional(),
